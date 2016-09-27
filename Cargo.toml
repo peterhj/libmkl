@@ -1,0 +1,11 @@
+[package]
+name = "mkl"
+version = "0.1.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+
+[lib]
+name = "mkl"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "*"
