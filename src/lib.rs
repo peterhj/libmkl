@@ -2,4 +2,5 @@
 
 extern crate libc;
 
+pub mod dnn;
 pub mod ffi;
