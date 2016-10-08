@@ -16,6 +16,40 @@ enum Flavor {
   F64,
 }
 
+pub struct MklDnnLayout<T> {
+  inner:    dnnLayout_t,
+  flavor:   Flavor,
+  _marker:  PhantomData<T>,
+}
+
+impl<T> Drop for MklDnnLayout<T> {
+  fn drop(&mut self) {
+    // FIXME(20161007): leak this in case double free is causing segfault.
+    /*let status = match self.flavor {
+      Flavor::F32 => unsafe { dnnLayoutDestroy_F32(self.inner) },
+      Flavor::F64 => unimplemented!(),
+    };
+    assert!(status.is_ok());*/
+  }
+}
+
+impl MklDnnLayout<f32> {
+  pub fn create(dim: &[usize], stride: &[usize]) -> Result<MklDnnLayout<f32>, dnnError_t> {
+    let ndim = dim.len();
+    assert_eq!(ndim, stride.len());
+    let mut inner: dnnLayout_t = null_mut();
+    let status = unsafe { dnnLayoutCreate_F32(&mut inner as *mut _, ndim, dim.as_ptr(), stride.as_ptr()) };
+    if status.is_err() {
+      return Err(status);
+    }
+    Ok(MklDnnLayout{
+      inner:    inner,
+      flavor:   Flavor::F32,
+      _marker:  PhantomData,
+    })
+  }
+}
+
 pub struct MklDnnAttrs<T> {
   inner:    dnnPrimitiveAttributes_t,
   flavor:   Flavor,
@@ -24,11 +58,12 @@ pub struct MklDnnAttrs<T> {
 
 impl<T> Drop for MklDnnAttrs<T> {
   fn drop(&mut self) {
-    let status = match self.flavor {
+    // FIXME(20161007): leak this in case double free is causing segfault.
+    /*let status = match self.flavor {
       Flavor::F32 => unsafe { dnnPrimitiveAttributesDestroy_F32(self.inner) },
       Flavor::F64 => unimplemented!(),
     };
-    assert!(status.is_ok());
+    assert!(status.is_ok());*/
   }
 }
 
@@ -86,8 +121,9 @@ impl MklDnnConv2dConfig {
 
 pub struct MklDnnConv2dFwd<T> {
   cfg:      MklDnnConv2dConfig,
-  inner:    dnnPrimitive_t,
   attrs:    MklDnnAttrs<T>,
+  offsets:  Vec<i32>,
+  inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
 }
 
@@ -96,10 +132,12 @@ impl MklDnnConv2dFwd<f32> {
     cfg.check();
     let mut inner: dnnPrimitive_t = null_mut();
     let attrs = MklDnnAttrs::create().unwrap();
+    // FIXME(20161007): the dim descriptors may need to be reversed;
+    // see: <https://github.com/01org/mkl-dnn/blob/master/tests/only_convolution.cpp>.
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnConvolutionCreateForwardBias_F32(
         &mut inner as *mut _,
-        attrs.inner,
+        null_mut(),
         cfg.algo.to_ffi(),
         4,
         cfg.in_dim.as_ptr(),
@@ -119,8 +157,9 @@ impl MklDnnConv2dFwd<f32> {
     }
     Ok(MklDnnConv2dFwd{
       cfg:      cfg,
-      inner:    inner,
       attrs:    attrs,
+      offsets:  offsets,
+      inner:    inner,
       res:      res,
     })
   }
@@ -140,8 +179,9 @@ impl MklDnnConv2dFwd<f32> {
 
 pub struct MklDnnConv2dFwdNoBias<T> {
   cfg:      MklDnnConv2dConfig,
-  inner:    dnnPrimitive_t,
   attrs:    MklDnnAttrs<T>,
+  offsets:  Vec<i32>,
+  inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
 }
 
@@ -153,7 +193,8 @@ impl MklDnnConv2dFwdNoBias<f32> {
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnConvolutionCreateForward_F32(
         &mut inner as *mut _,
-        attrs.inner,
+        //attrs.inner,
+        null_mut(),
         cfg.algo.to_ffi(),
         4,
         cfg.in_dim.as_ptr(),
@@ -173,8 +214,9 @@ impl MklDnnConv2dFwdNoBias<f32> {
     }
     Ok(MklDnnConv2dFwdNoBias{
       cfg:      cfg,
-      inner:    inner,
       attrs:    attrs,
+      offsets:  offsets,
+      inner:    inner,
       res:      res,
     })
   }
@@ -193,8 +235,9 @@ impl MklDnnConv2dFwdNoBias<f32> {
 
 pub struct MklDnnConv2dBwdInput<T> {
   cfg:      MklDnnConv2dConfig,
-  inner:    dnnPrimitive_t,
   attrs:    MklDnnAttrs<T>,
+  offsets:  Vec<i32>,
+  inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
 }
 
@@ -204,10 +247,13 @@ impl MklDnnConv2dBwdInput<f32> {
     let mut inner: dnnPrimitive_t = null_mut();
     let attrs = MklDnnAttrs::create().unwrap();
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
+    //let status = unsafe { dnnGroupsConvolutionCreateBackwardData_F32(
     let status = unsafe { dnnConvolutionCreateBackwardData_F32(
         &mut inner as *mut _,
-        attrs.inner,
+        //attrs.inner,
+        null_mut(),
         cfg.algo.to_ffi(),
+        //1,
         4,
         cfg.in_dim.as_ptr(),
         cfg.out_dim.as_ptr(),
@@ -226,14 +272,15 @@ impl MklDnnConv2dBwdInput<f32> {
     }
     Ok(MklDnnConv2dBwdInput{
       cfg:      cfg,
-      inner:    inner,
       attrs:    attrs,
+      offsets:  offsets,
+      inner:    inner,
       res:      res,
     })
   }
 
   pub fn execute(&mut self, in_buf: *const f32, w: *const f32, out_grad: *const f32, in_grad: *mut f32) -> Result<(), dnnError_t> {
-    self.res[dnnResourceType_t::dnnResourceSrc as usize]        = in_buf as *mut _;
+    //self.res[dnnResourceType_t::dnnResourceSrc as usize]        = in_buf as *mut _;
     self.res[dnnResourceType_t::dnnResourceFilter as usize]     = w as *mut _;
     self.res[dnnResourceType_t::dnnResourceDiffDst as usize]    = out_grad as *mut _;
     self.res[dnnResourceType_t::dnnResourceDiffSrc as usize]    = in_grad as *mut _;
@@ -247,8 +294,9 @@ impl MklDnnConv2dBwdInput<f32> {
 
 pub struct MklDnnConv2dBwdKernel<T> {
   cfg:      MklDnnConv2dConfig,
-  inner:    dnnPrimitive_t,
   attrs:    MklDnnAttrs<T>,
+  offsets:  Vec<i32>,
+  inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
 }
 
@@ -260,7 +308,8 @@ impl MklDnnConv2dBwdKernel<f32> {
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnConvolutionCreateBackwardFilter_F32(
         &mut inner as *mut _,
-        attrs.inner,
+        //attrs.inner,
+        null_mut(),
         cfg.algo.to_ffi(),
         4,
         cfg.in_dim.as_ptr(),
@@ -273,6 +322,7 @@ impl MklDnnConv2dBwdKernel<f32> {
     if status.is_err() {
       return Err(status);
     }
+    assert!(!inner.is_null());
     let nres = dnnResourceType_t::dnnResourceNumber as usize;
     let mut res = Vec::with_capacity(nres);
     for _ in 0 .. nres {
@@ -280,8 +330,9 @@ impl MklDnnConv2dBwdKernel<f32> {
     }
     Ok(MklDnnConv2dBwdKernel{
       cfg:      cfg,
-      inner:    inner,
       attrs:    attrs,
+      offsets:  offsets,
+      inner:    inner,
       res:      res,
     })
   }
@@ -300,8 +351,8 @@ impl MklDnnConv2dBwdKernel<f32> {
 
 pub struct MklDnnConv2dBwdBias<T> {
   cfg:      MklDnnConv2dConfig,
-  inner:    dnnPrimitive_t,
   attrs:    MklDnnAttrs<T>,
+  inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
 }
 
@@ -312,7 +363,8 @@ impl MklDnnConv2dBwdBias<f32> {
     let attrs = MklDnnAttrs::create().unwrap();
     let status = unsafe { dnnConvolutionCreateBackwardBias_F32(
         &mut inner as *mut _,
-        attrs.inner,
+        //attrs.inner,
+        null_mut(),
         cfg.algo.to_ffi(),
         4,
         cfg.out_dim.as_ptr(),

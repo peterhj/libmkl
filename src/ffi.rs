@@ -74,9 +74,14 @@ pub enum dnnBorder_t {
 #[link(name = "mkl_sequential")]
 #[link(name = "mkl_core")]
 extern "C" {
-  //pub fn dnnLayoutCreate_F32() -> dnnError_t;
-  //pub fn dnnLayoutCreateFromPrimitive_F32() -> dnnError_t;
-  //pub fn dnnLayoutDelete_F32() -> dnnError_t;
+  pub fn dnnLayoutCreate_F32(
+      p_layout: *mut dnnLayout_t,
+      dimension: size_t,
+      size: *const size_t,
+      strides: *const size_t,
+  ) -> dnnError_t;
+  pub fn dnnLayoutCreateFromPrimitive_F32() -> dnnError_t;
+  pub fn dnnLayoutDelete_F32(layout: dnnLayout_t) -> dnnError_t;
 
   pub fn dnnPrimitiveAttributesCreate_F32(attributes: *mut dnnPrimitiveAttributes_t) -> dnnError_t;
   pub fn dnnPrimitiveAttributesDestroy_F32(attributes: dnnPrimitiveAttributes_t) -> dnnError_t;
@@ -91,55 +96,68 @@ extern "C" {
       p_convolution: *mut dnnPrimitive_t,
       attributes: dnnPrimitiveAttributes_t,
       algorithm: dnnAlgorithm_t,
-      dimension: usize,
-      src_size: *const usize,
-      dst_size: *const usize,
-      filter_size: *const usize,
-      convolution_strides: *const usize,
+      dimension: size_t,
+      src_size: *const size_t,
+      dst_size: *const size_t,
+      filter_size: *const size_t,
+      convolution_strides: *const size_t,
       input_offset: *const c_int,
       border_type: dnnBorder_t,
-      ) -> dnnError_t;
+  ) -> dnnError_t;
   pub fn dnnConvolutionCreateForwardBias_F32(
       p_convolution: *mut dnnPrimitive_t,
       attributes: dnnPrimitiveAttributes_t,
       algorithm: dnnAlgorithm_t,
-      dimension: usize,
-      src_size: *const usize,
-      dst_size: *const usize,
-      filter_size: *const usize,
-      convolution_strides: *const usize,
+      dimension: size_t,
+      src_size: *const size_t,
+      dst_size: *const size_t,
+      filter_size: *const size_t,
+      convolution_strides: *const size_t,
       input_offset: *const c_int,
       border_type: dnnBorder_t,
-      ) -> dnnError_t;
+  ) -> dnnError_t;
   pub fn dnnConvolutionCreateBackwardData_F32(
       p_convolution: *mut dnnPrimitive_t,
       attributes: dnnPrimitiveAttributes_t,
       algorithm: dnnAlgorithm_t,
-      dimension: usize,
-      src_size: *const usize,
-      dst_size: *const usize,
-      filter_size: *const usize,
-      convolution_strides: *const usize,
+      dimension: size_t,
+      src_size: *const size_t,
+      dst_size: *const size_t,
+      filter_size: *const size_t,
+      convolution_strides: *const size_t,
       input_offset: *const c_int,
       border_type: dnnBorder_t,
-      ) -> dnnError_t;
+  ) -> dnnError_t;
+  pub fn dnnGroupsConvolutionCreateBackwardData_F32(
+      p_convolution: *mut dnnPrimitive_t,
+      attributes: dnnPrimitiveAttributes_t,
+      algorithm: dnnAlgorithm_t,
+      groups: size_t,
+      dimension: size_t,
+      src_size: *const size_t,
+      dst_size: *const size_t,
+      filter_size: *const size_t,
+      convolution_strides: *const size_t,
+      input_offset: *const c_int,
+      border_type: dnnBorder_t,
+  ) -> dnnError_t;
   pub fn dnnConvolutionCreateBackwardFilter_F32(
       p_convolution: *mut dnnPrimitive_t,
       attributes: dnnPrimitiveAttributes_t,
       algorithm: dnnAlgorithm_t,
-      dimension: usize,
-      src_size: *const usize,
-      dst_size: *const usize,
-      filter_size: *const usize,
-      convolution_strides: *const usize,
+      dimension: size_t,
+      src_size: *const size_t,
+      dst_size: *const size_t,
+      filter_size: *const size_t,
+      convolution_strides: *const size_t,
       input_offset: *const c_int,
       border_type: dnnBorder_t,
-      ) -> dnnError_t;
+  ) -> dnnError_t;
   pub fn dnnConvolutionCreateBackwardBias_F32(
       p_convolution: *mut dnnPrimitive_t,
       attributes: dnnPrimitiveAttributes_t,
       algorithm: dnnAlgorithm_t,
-      dimension: usize,
-      dst_size: *const usize,
-      ) -> dnnError_t;
+      dimension: size_t,
+      dst_size: *const size_t,
+  ) -> dnnError_t;
 }
