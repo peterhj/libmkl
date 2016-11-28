@@ -70,9 +70,9 @@ pub enum dnnBorder_t {
   dnnBorderExtrapolation  = 0x3
 }
 
-#[link(name = "mkl_intel_lp64")]
+/*#[link(name = "mkl_intel_lp64")]
 #[link(name = "mkl_sequential")]
-#[link(name = "mkl_core")]
+#[link(name = "mkl_core")]*/
 extern "C" {
   pub fn dnnLayoutCreate_F32(
       p_layout: *mut dnnLayout_t,
@@ -80,7 +80,7 @@ extern "C" {
       size: *const size_t,
       strides: *const size_t,
   ) -> dnnError_t;
-  pub fn dnnLayoutCreateFromPrimitive_F32() -> dnnError_t;
+  //pub fn dnnLayoutCreateFromPrimitive_F32() -> dnnError_t;
   pub fn dnnLayoutDelete_F32(layout: dnnLayout_t) -> dnnError_t;
 
   pub fn dnnPrimitiveAttributesCreate_F32(attributes: *mut dnnPrimitiveAttributes_t) -> dnnError_t;
@@ -159,5 +159,26 @@ extern "C" {
       algorithm: dnnAlgorithm_t,
       dimension: size_t,
       dst_size: *const size_t,
+  ) -> dnnError_t;
+
+  pub fn dnnPoolingCreateForward_F32(
+      p_convolution: *mut dnnPrimitive_t,
+      attributes: dnnPrimitiveAttributes_t,
+      algorithm: dnnAlgorithm_t,
+      src_layout: dnnLayout_t,
+      kernel_size: *const size_t,
+      kernel_stride: *const size_t,
+      input_offset: *const c_int,
+      border_type: dnnBorder_t,
+  ) -> dnnError_t;
+  pub fn dnnPoolingCreateBackward_F32(
+      p_convolution: *mut dnnPrimitive_t,
+      attributes: dnnPrimitiveAttributes_t,
+      algorithm: dnnAlgorithm_t,
+      src_layout: dnnLayout_t,
+      kernel_size: *const size_t,
+      kernel_stride: *const size_t,
+      input_offset: *const c_int,
+      border_type: dnnBorder_t,
   ) -> dnnError_t;
 }

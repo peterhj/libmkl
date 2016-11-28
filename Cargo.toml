@@ -8,8 +8,8 @@ name = "mkl_dnn"
 path = "src/lib.rs"
 
 #[[bin]]
-#name = "test"
-#path = "tools/test.rs"
+#name = "conv-test"
+#path = "tools/conv-test.rs"
 
 [dependencies]
 libc = "*"

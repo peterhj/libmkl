@@ -9,6 +9,7 @@ use std::marker::{PhantomData};
 use std::ptr::{null_mut};
 
 pub mod ffi;
+pub mod prelude;
 
 #[derive(Clone, Copy)]
 enum Flavor {
@@ -17,9 +18,11 @@ enum Flavor {
 }
 
 pub struct MklDnnLayout<T> {
+  dim:      Vec<usize>,
+  stride:   Vec<usize>,
   inner:    dnnLayout_t,
   flavor:   Flavor,
-  _marker:  PhantomData<T>,
+  _marker:  PhantomData<fn (T)>,
 }
 
 impl<T> Drop for MklDnnLayout<T> {
@@ -34,7 +37,7 @@ impl<T> Drop for MklDnnLayout<T> {
 }
 
 impl MklDnnLayout<f32> {
-  pub fn create(dim: &[usize], stride: &[usize]) -> Result<MklDnnLayout<f32>, dnnError_t> {
+  pub fn create(dim: Vec<usize>, stride: Vec<usize>) -> Result<MklDnnLayout<f32>, dnnError_t> {
     let ndim = dim.len();
     assert_eq!(ndim, stride.len());
     let mut inner: dnnLayout_t = null_mut();
@@ -43,6 +46,8 @@ impl MklDnnLayout<f32> {
       return Err(status);
     }
     Ok(MklDnnLayout{
+      dim:      dim,
+      stride:   stride,
       inner:    inner,
       flavor:   Flavor::F32,
       _marker:  PhantomData,
@@ -107,6 +112,7 @@ pub struct MklDnnConv2dConfig {
   pub w_dim:    Vec<usize>,
   pub stride:   Vec<usize>,
   pub pad:      Vec<usize>,
+  pub bias:     bool,
 }
 
 impl MklDnnConv2dConfig {
@@ -121,34 +127,53 @@ impl MklDnnConv2dConfig {
 
 pub struct MklDnnConv2dFwd<T> {
   cfg:      MklDnnConv2dConfig,
-  attrs:    MklDnnAttrs<T>,
+  //attrs:    MklDnnAttrs<T>,
   offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
 }
 
 impl MklDnnConv2dFwd<f32> {
   pub fn create(cfg: MklDnnConv2dConfig) -> Result<MklDnnConv2dFwd<f32>, dnnError_t> {
     cfg.check();
     let mut inner: dnnPrimitive_t = null_mut();
-    let attrs = MklDnnAttrs::create().unwrap();
+    //let attrs = MklDnnAttrs::create().unwrap();
     // FIXME(20161007): the dim descriptors may need to be reversed;
     // see: <https://github.com/01org/mkl-dnn/blob/master/tests/only_convolution.cpp>.
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
-    let status = unsafe { dnnConvolutionCreateForwardBias_F32(
-        &mut inner as *mut _,
-        null_mut(),
-        cfg.algo.to_ffi(),
-        4,
-        cfg.in_dim.as_ptr(),
-        cfg.out_dim.as_ptr(),
-        cfg.w_dim.as_ptr(),
-        cfg.stride.as_ptr(),
-        offsets.as_ptr(),
-        dnnBorder_t::dnnBorderZeros,
-    ) };
-    if status.is_err() {
-      return Err(status);
+    if cfg.bias {
+      let status = unsafe { dnnConvolutionCreateForwardBias_F32(
+          &mut inner as *mut _,
+          null_mut(),
+          cfg.algo.to_ffi(),
+          4,
+          cfg.in_dim.as_ptr(),
+          cfg.out_dim.as_ptr(),
+          cfg.w_dim.as_ptr(),
+          cfg.stride.as_ptr(),
+          offsets.as_ptr(),
+          dnnBorder_t::dnnBorderZeros,
+      ) };
+      if status.is_err() {
+        return Err(status);
+      }
+    } else {
+      let status = unsafe { dnnConvolutionCreateForward_F32(
+          &mut inner as *mut _,
+          null_mut(),
+          cfg.algo.to_ffi(),
+          4,
+          cfg.in_dim.as_ptr(),
+          cfg.out_dim.as_ptr(),
+          cfg.w_dim.as_ptr(),
+          cfg.stride.as_ptr(),
+          offsets.as_ptr(),
+          dnnBorder_t::dnnBorderZeros,
+      ) };
+      if status.is_err() {
+        return Err(status);
+      }
     }
     let nres = dnnResourceType_t::dnnResourceNumber as usize;
     let mut res = Vec::with_capacity(nres);
@@ -157,17 +182,20 @@ impl MklDnnConv2dFwd<f32> {
     }
     Ok(MklDnnConv2dFwd{
       cfg:      cfg,
-      attrs:    attrs,
+      //attrs:    attrs,
       offsets:  offsets,
       inner:    inner,
       res:      res,
+      _marker:  PhantomData,
     })
   }
 
-  pub fn execute(&mut self, in_: *const f32, w: *const f32, b: *const f32, out: *mut f32) -> Result<(), dnnError_t> {
+  pub fn execute(&mut self, in_: *const f32, w: *const f32, b: Option<*const f32>, out: *mut f32) -> Result<(), dnnError_t> {
     self.res[dnnResourceType_t::dnnResourceSrc as usize]    = in_ as *mut _;
     self.res[dnnResourceType_t::dnnResourceFilter as usize] = w as *mut _;
-    self.res[dnnResourceType_t::dnnResourceBias as usize]   = b as *mut _;
+    if self.cfg.bias {
+      self.res[dnnResourceType_t::dnnResourceBias as usize] = b.unwrap() as *mut _;
+    }
     self.res[dnnResourceType_t::dnnResourceDst as usize]    = out as *mut _;
     let status = unsafe { dnnExecute_F32(self.inner, self.res.as_mut_ptr()) };
     if status.is_err() {
@@ -177,7 +205,7 @@ impl MklDnnConv2dFwd<f32> {
   }
 }
 
-pub struct MklDnnConv2dFwdNoBias<T> {
+/*pub struct MklDnnConv2dFwdNoBias<T> {
   cfg:      MklDnnConv2dConfig,
   attrs:    MklDnnAttrs<T>,
   offsets:  Vec<i32>,
@@ -231,21 +259,22 @@ impl MklDnnConv2dFwdNoBias<f32> {
     }
     Ok(())
   }
-}
+}*/
 
 pub struct MklDnnConv2dBwdInput<T> {
   cfg:      MklDnnConv2dConfig,
-  attrs:    MklDnnAttrs<T>,
+  //attrs:    MklDnnAttrs<T>,
   offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
 }
 
 impl MklDnnConv2dBwdInput<f32> {
   pub fn create(cfg: MklDnnConv2dConfig) -> Result<MklDnnConv2dBwdInput<f32>, dnnError_t> {
     cfg.check();
     let mut inner: dnnPrimitive_t = null_mut();
-    let attrs = MklDnnAttrs::create().unwrap();
+    //let attrs = MklDnnAttrs::create().unwrap();
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     //let status = unsafe { dnnGroupsConvolutionCreateBackwardData_F32(
     let status = unsafe { dnnConvolutionCreateBackwardData_F32(
@@ -272,10 +301,11 @@ impl MklDnnConv2dBwdInput<f32> {
     }
     Ok(MklDnnConv2dBwdInput{
       cfg:      cfg,
-      attrs:    attrs,
+      //attrs:    attrs,
       offsets:  offsets,
       inner:    inner,
       res:      res,
+      _marker:  PhantomData,
     })
   }
 
@@ -294,17 +324,18 @@ impl MklDnnConv2dBwdInput<f32> {
 
 pub struct MklDnnConv2dBwdKernel<T> {
   cfg:      MklDnnConv2dConfig,
-  attrs:    MklDnnAttrs<T>,
+  //attrs:    MklDnnAttrs<T>,
   offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
 }
 
 impl MklDnnConv2dBwdKernel<f32> {
   pub fn create(cfg: MklDnnConv2dConfig) -> Result<MklDnnConv2dBwdKernel<f32>, dnnError_t> {
     cfg.check();
     let mut inner: dnnPrimitive_t = null_mut();
-    let attrs = MklDnnAttrs::create().unwrap();
+    //let attrs = MklDnnAttrs::create().unwrap();
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnConvolutionCreateBackwardFilter_F32(
         &mut inner as *mut _,
@@ -330,10 +361,11 @@ impl MklDnnConv2dBwdKernel<f32> {
     }
     Ok(MklDnnConv2dBwdKernel{
       cfg:      cfg,
-      attrs:    attrs,
+      //attrs:    attrs,
       offsets:  offsets,
       inner:    inner,
       res:      res,
+      _marker:  PhantomData,
     })
   }
 
@@ -351,16 +383,17 @@ impl MklDnnConv2dBwdKernel<f32> {
 
 pub struct MklDnnConv2dBwdBias<T> {
   cfg:      MklDnnConv2dConfig,
-  attrs:    MklDnnAttrs<T>,
+  //attrs:    MklDnnAttrs<T>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
 }
 
 impl MklDnnConv2dBwdBias<f32> {
   pub fn create(cfg: MklDnnConv2dConfig) -> Result<MklDnnConv2dBwdBias<f32>, dnnError_t> {
     cfg.check();
     let mut inner: dnnPrimitive_t = null_mut();
-    let attrs = MklDnnAttrs::create().unwrap();
+    //let attrs = MklDnnAttrs::create().unwrap();
     let status = unsafe { dnnConvolutionCreateBackwardBias_F32(
         &mut inner as *mut _,
         //attrs.inner,
@@ -380,8 +413,9 @@ impl MklDnnConv2dBwdBias<f32> {
     Ok(MklDnnConv2dBwdBias{
       cfg:      cfg,
       inner:    inner,
-      attrs:    attrs,
+      //attrs:    attrs,
       res:      res,
+      _marker:  PhantomData,
     })
   }
 
@@ -396,16 +430,134 @@ impl MklDnnConv2dBwdBias<f32> {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum MklDnnPoolAlgo {
+  Max,
+  Min,
+  Average,
+}
+
+impl MklDnnPoolAlgo {
+  pub fn to_ffi(&self) -> dnnAlgorithm_t {
+    match *self {
+      MklDnnPoolAlgo::Max       => dnnAlgorithm_t::dnnAlgorithmPoolingMax,
+      MklDnnPoolAlgo::Min       => dnnAlgorithm_t::dnnAlgorithmPoolingMin,
+      MklDnnPoolAlgo::Average   => dnnAlgorithm_t::dnnAlgorithmPoolingAvg,
+    }
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct MklDnnPool2dConfig {
+  pub in_dim:   Vec<usize>,
+  pub pool_dim: Vec<usize>,
+  pub stride:   Vec<usize>,
+  pub pad:      Vec<usize>,
+  pub algo:     MklDnnPoolAlgo,
+}
+
 pub struct MklDnnPool2dFwd<T> {
-  //cfg:      ,
+  cfg:      MklDnnPool2dConfig,
+  offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
-  attrs:    MklDnnAttrs<T>,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
+}
+
+impl MklDnnPool2dFwd<f32> {
+  pub fn create(cfg: MklDnnPool2dConfig) -> Result<MklDnnPool2dFwd<f32>, dnnError_t> {
+    let mut inner: dnnPrimitive_t = null_mut();
+    let in_strides = vec![
+        1,
+        cfg.in_dim[0],
+        cfg.in_dim[0] * cfg.in_dim[1],
+        cfg.in_dim[0] * cfg.in_dim[1] * cfg.in_dim[2],
+    ];
+    let mut layout = MklDnnLayout::create(cfg.in_dim.clone(), in_strides).unwrap();
+    let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
+    let status = unsafe { dnnPoolingCreateForward_F32(
+        &mut inner as *mut _,
+        null_mut(),
+        cfg.algo.to_ffi(),
+        layout.inner,
+        cfg.pool_dim.as_ptr(),
+        cfg.stride.as_ptr(),
+        offsets.as_ptr(),
+        dnnBorder_t::dnnBorderZeros,
+    ) };
+    if status.is_err() {
+      return Err(status);
+    }
+    assert!(!inner.is_null());
+    let nres = dnnResourceType_t::dnnResourceNumber as usize;
+    let mut res = Vec::with_capacity(nres);
+    for _ in 0 .. nres {
+      res.push(null_mut());
+    }
+    Ok(MklDnnPool2dFwd{
+      cfg:      cfg,
+      offsets:  offsets,
+      inner:    inner,
+      res:      res,
+      _marker:  PhantomData,
+    })
+  }
 }
 
 pub struct MklDnnPool2dBwd<T> {
-  //cfg:      ,
+  cfg:      MklDnnPool2dConfig,
+  offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
-  attrs:    MklDnnAttrs<T>,
   res:      Vec<*mut c_void>,
+  _marker:  PhantomData<fn (T)>,
+}
+
+impl MklDnnPool2dBwd<f32> {
+  pub fn create(cfg: MklDnnPool2dConfig) -> Result<MklDnnPool2dBwd<f32>, dnnError_t> {
+    let mut inner: dnnPrimitive_t = null_mut();
+    let in_strides = vec![
+        1,
+        cfg.in_dim[0],
+        cfg.in_dim[0] * cfg.in_dim[1],
+        cfg.in_dim[0] * cfg.in_dim[1] * cfg.in_dim[2],
+    ];
+    let mut layout = MklDnnLayout::create(cfg.in_dim.clone(), in_strides).unwrap();
+    let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
+    let status = unsafe { dnnPoolingCreateBackward_F32(
+        &mut inner as *mut _,
+        null_mut(),
+        cfg.algo.to_ffi(),
+        layout.inner,
+        cfg.pool_dim.as_ptr(),
+        cfg.stride.as_ptr(),
+        offsets.as_ptr(),
+        dnnBorder_t::dnnBorderZeros,
+    ) };
+    if status.is_err() {
+      return Err(status);
+    }
+    assert!(!inner.is_null());
+    let nres = dnnResourceType_t::dnnResourceNumber as usize;
+    let mut res = Vec::with_capacity(nres);
+    for _ in 0 .. nres {
+      res.push(null_mut());
+    }
+    Ok(MklDnnPool2dBwd{
+      cfg:      cfg,
+      offsets:  offsets,
+      inner:    inner,
+      res:      res,
+      _marker:  PhantomData,
+    })
+  }
+
+  pub fn execute(&mut self, in_buf: *const f32, out_grad: *const f32) -> Result<(), dnnError_t> {
+    self.res[dnnResourceType_t::dnnResourceSrc as usize]        = in_buf as *mut _;
+    self.res[dnnResourceType_t::dnnResourceDiffDst as usize]    = out_grad as *mut _;
+    let status = unsafe { dnnExecute_F32(self.inner, self.res.as_mut_ptr()) };
+    if status.is_err() {
+      return Err(status);
+    }
+    Ok(())
+  }
 }
