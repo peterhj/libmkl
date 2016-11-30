@@ -1,4 +1,6 @@
 pub use super::{
+  MklDnnLayout,
+  MklDnnBuffer,
   MklDnnConvAlgo,
   MklDnnConv2dConfig,
   MklDnnConv2dFwd,

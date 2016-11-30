@@ -34,12 +34,12 @@ impl dnnError_t {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub enum dnnAlgorithm_t {
-  dnnAlgorithmConvolutionGemm  , // GEMM based convolution
-  dnnAlgorithmConvolutionDirect, // Direct convolution
-  dnnAlgorithmConvolutionFFT   , // FFT based convolution
-  dnnAlgorithmPoolingMax       , // Maximum pooling
-  dnnAlgorithmPoolingMin       , // Minimum pooling
-  dnnAlgorithmPoolingAvg         // Average pooling
+  dnnAlgorithmConvolutionGemm   = 0, // GEMM based convolution
+  dnnAlgorithmConvolutionDirect = 1, // Direct convolution
+  dnnAlgorithmConvolutionFFT    = 2, // FFT based convolution
+  dnnAlgorithmPoolingMax        = 3, // Maximum pooling
+  dnnAlgorithmPoolingMin        = 4, // Minimum pooling
+  dnnAlgorithmPoolingAvg        = 5  // Average pooling
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -80,8 +80,32 @@ extern "C" {
       size: *const size_t,
       strides: *const size_t,
   ) -> dnnError_t;
-  //pub fn dnnLayoutCreateFromPrimitive_F32() -> dnnError_t;
+  pub fn dnnLayoutCreateFromPrimitive_F32(
+      p_layout: *mut dnnLayout_t,
+      primitive: dnnPrimitive_t,
+      ty_: dnnResourceType_t,
+  ) -> dnnError_t;
+  pub fn dnnLayoutGetMemorySize_F32(layout: dnnLayout_t) -> size_t;
   pub fn dnnLayoutDelete_F32(layout: dnnLayout_t) -> dnnError_t;
+
+  pub fn dnnAllocateBuffer_F32(
+      p_ptr: *mut *mut c_void,
+      layout: dnnLayout_t,
+  ) -> dnnError_t;
+  pub fn dnnReleaseBuffer_F32(
+      ptr: *mut c_void,
+  ) -> dnnError_t;
+
+  pub fn dnnConversionCreate_F32(
+      p_conversion: *mut dnnPrimitive_t,
+      from: dnnLayout_t,
+      to: dnnLayout_t,
+  ) -> dnnError_t;
+  pub fn dnnConversionExecute_F32(
+      conversion: dnnPrimitive_t,
+      from: *const c_void,
+      to: *mut c_void,
+  ) -> dnnError_t;
 
   pub fn dnnPrimitiveAttributesCreate_F32(attributes: *mut dnnPrimitiveAttributes_t) -> dnnError_t;
   pub fn dnnPrimitiveAttributesDestroy_F32(attributes: dnnPrimitiveAttributes_t) -> dnnError_t;
