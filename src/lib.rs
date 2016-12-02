@@ -772,6 +772,7 @@ impl MklDnnPoolAlgo {
 #[derive(Clone, Debug)]
 pub struct MklDnnPool2dConfig {
   pub in_dim:   Vec<usize>,
+  pub out_dim:   Vec<usize>,
   pub pool_dim: Vec<usize>,
   pub stride:   Vec<usize>,
   pub pad:      Vec<usize>,
@@ -780,9 +781,19 @@ pub struct MklDnnPool2dConfig {
 
 pub struct MklDnnPool2dFwd<T> {
   cfg:      MklDnnPool2dConfig,
+  layout:   MklDnnLayout<T>,
   offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  src_layout:   MklDnnLayout<T>,
+  dst_layout:   MklDnnLayout<T>,
+  src_buf:      MklDnnBuffer<T>,
+  dst_buf:      MklDnnBuffer<T>,
+  workspace:    MklDnnBuffer<T>,
+  load_src:     MklDnnConversion<T>,
+  load_dst:     MklDnnConversion<T>,
+  store_src:    MklDnnConversion<T>,
+  store_dst:    MklDnnConversion<T>,
   _marker:  PhantomData<fn (T)>,
 }
 
@@ -796,8 +807,8 @@ impl MklDnnPool2dFwd<f32> {
         cfg.in_dim[0] * cfg.in_dim[1] * cfg.in_dim[2],
     ];
     let mut layout = MklDnnLayout::create(cfg.in_dim.clone(), in_strides).unwrap();*/
-    let mut layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
-    let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
+    let layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
+    let offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnPoolingCreateForward_F32(
         &mut inner as *mut _,
         null_mut(),
@@ -817,21 +828,77 @@ impl MklDnnPool2dFwd<f32> {
     for _ in 0 .. nres {
       res.push(null_mut());
     }
+    let src_layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
+    let dst_layout = MklDnnLayout::create(cfg.out_dim.clone()).unwrap();
+    //let src_buf = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceSrc).unwrap()).unwrap();
+    let src_buf = MklDnnBuffer::create(MklDnnLayout::create(cfg.in_dim.clone()).unwrap()).unwrap();
+    //let dst_buf = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceDst).unwrap()).unwrap();
+    let dst_buf = MklDnnBuffer::create(MklDnnLayout::create(cfg.out_dim.clone()).unwrap()).unwrap();
+    //let workspace = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceWorkspace).unwrap()).unwrap();
+    let workspace = MklDnnBuffer::create(MklDnnLayout::create(cfg.out_dim.clone()).unwrap()).unwrap();
+    let load_src = MklDnnConversion::create(&src_layout, &src_buf.layout).unwrap();
+    let load_dst = MklDnnConversion::create(&dst_layout, &dst_buf.layout).unwrap();
+    let store_src = MklDnnConversion::create(&src_buf.layout, &src_layout).unwrap();
+    let store_dst = MklDnnConversion::create(&dst_buf.layout, &dst_layout).unwrap();
     Ok(MklDnnPool2dFwd{
       cfg:      cfg,
+      layout:   layout,
       offsets:  offsets,
       inner:    inner,
       res:      res,
+      src_layout:   src_layout,
+      dst_layout:   dst_layout,
+      src_buf:      src_buf,
+      dst_buf:      dst_buf,
+      workspace:    workspace,
+      load_src:     load_src,
+      load_dst:     load_dst,
+      store_src:    store_src,
+      store_dst:    store_dst,
       _marker:  PhantomData,
     })
+  }
+
+  pub fn _workspace(&self) -> *mut f32 {
+    self.workspace.as_mut_ptr()
+  }
+
+  pub fn execute(&mut self, in_buf: *const f32, out_buf: *mut f32) -> Result<(), dnnError_t> {
+    /*self.res[dnnResourceType_t::dnnResourceSrc as usize]        = in_buf as *mut _;
+    self.res[dnnResourceType_t::dnnResourceDst as usize]        = out_buf as *mut _;*/
+
+    self.res[dnnResourceType_t::dnnResourceSrc as usize]        = self.src_buf.as_mut_ptr() as *mut _;;
+    self.res[dnnResourceType_t::dnnResourceDst as usize]        = self.dst_buf.as_mut_ptr() as *mut _;
+    self.res[dnnResourceType_t::dnnResourceWorkspace as usize]  = self.workspace.as_mut_ptr() as *mut _;
+
+    self.load_src.convert(in_buf, self.src_buf.as_mut_ptr()).unwrap();
+
+    let status = unsafe { dnnExecute_F32(self.inner, self.res.as_mut_ptr()) };
+    if status.is_err() {
+      return Err(status);
+    }
+
+    self.store_dst.convert(self.dst_buf.as_ptr(), out_buf).unwrap();
+
+    Ok(())
   }
 }
 
 pub struct MklDnnPool2dBwd<T> {
   cfg:      MklDnnPool2dConfig,
+  layout:   MklDnnLayout<T>,
   offsets:  Vec<i32>,
   inner:    dnnPrimitive_t,
   res:      Vec<*mut c_void>,
+  src_layout:   MklDnnLayout<T>,
+  dst_layout:   MklDnnLayout<T>,
+  src_buf:      MklDnnBuffer<T>,
+  dst_buf:      MklDnnBuffer<T>,
+  //workspace:    MklDnnBuffer<T>,
+  load_src:     MklDnnConversion<T>,
+  load_dst:     MklDnnConversion<T>,
+  store_src:    MklDnnConversion<T>,
+  store_dst:    MklDnnConversion<T>,
   _marker:  PhantomData<fn (T)>,
 }
 
@@ -844,8 +911,8 @@ impl MklDnnPool2dBwd<f32> {
         cfg.in_dim[0] * cfg.in_dim[1],
         cfg.in_dim[0] * cfg.in_dim[1] * cfg.in_dim[2],
     ];
-    let mut layout = MklDnnLayout::create(cfg.in_dim.clone(), in_strides).unwrap();*/
-    let mut layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
+    let layout = MklDnnLayout::create(cfg.in_dim.clone(), in_strides).unwrap();*/
+    let layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
     let mut offsets = vec![-(cfg.pad[0] as i32), -(cfg.pad[1] as i32)];
     let status = unsafe { dnnPoolingCreateBackward_F32(
         &mut inner as *mut _,
@@ -866,22 +933,55 @@ impl MklDnnPool2dBwd<f32> {
     for _ in 0 .. nres {
       res.push(null_mut());
     }
+    let src_layout = MklDnnLayout::create(cfg.in_dim.clone()).unwrap();
+    let dst_layout = MklDnnLayout::create(cfg.out_dim.clone()).unwrap();
+    //let src_buf = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceDiffSrc).unwrap()).unwrap();
+    let src_buf = MklDnnBuffer::create(MklDnnLayout::create(cfg.in_dim.clone()).unwrap()).unwrap();
+    //let dst_buf = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceDst).unwrap()).unwrap();
+    let dst_buf = MklDnnBuffer::create(MklDnnLayout::create(cfg.out_dim.clone()).unwrap()).unwrap();
+    //let workspace = MklDnnBuffer::create(MklDnnLayout::create_from_primitive(inner, dnnResourceType_t::dnnResourceWorkspace).unwrap()).unwrap();
+    let load_src = MklDnnConversion::create(&src_layout, &src_buf.layout).unwrap();
+    let load_dst = MklDnnConversion::create(&dst_layout, &dst_buf.layout).unwrap();
+    let store_src = MklDnnConversion::create(&src_buf.layout, &src_layout).unwrap();
+    let store_dst = MklDnnConversion::create(&dst_buf.layout, &dst_layout).unwrap();
     Ok(MklDnnPool2dBwd{
       cfg:      cfg,
+      layout:   layout,
       offsets:  offsets,
       inner:    inner,
       res:      res,
+      src_layout:   src_layout,
+      dst_layout:   dst_layout,
+      src_buf:      src_buf,
+      dst_buf:      dst_buf,
+      //workspace:    workspace,
+      load_src:     load_src,
+      load_dst:     load_dst,
+      store_src:    store_src,
+      store_dst:    store_dst,
       _marker:  PhantomData,
     })
   }
 
-  pub fn execute(&mut self, in_buf: *const f32, out_grad: *const f32) -> Result<(), dnnError_t> {
-    self.res[dnnResourceType_t::dnnResourceSrc as usize]        = in_buf as *mut _;
-    self.res[dnnResourceType_t::dnnResourceDiffDst as usize]    = out_grad as *mut _;
+  pub fn execute(&mut self, out_grad: *const f32, in_grad: *mut f32, workspace: *mut f32) -> Result<(), dnnError_t> {
+    /*self.res[dnnResourceType_t::dnnResourceDiffDst as usize]    = out_grad as *mut _;
+    self.res[dnnResourceType_t::dnnResourceDiffSrc as usize]    = in_grad as *mut _;*/
+
+    self.res[dnnResourceType_t::dnnResourceDiffDst as usize]    = self.dst_buf.as_mut_ptr() as *mut _;
+    self.res[dnnResourceType_t::dnnResourceDiffSrc as usize]    = self.src_buf.as_mut_ptr() as *mut _;;
+    //self.res[dnnResourceType_t::dnnResourceWorkspace as usize]  = self.workspace.as_mut_ptr() as *mut _;
+    self.res[dnnResourceType_t::dnnResourceWorkspace as usize]  = workspace as *mut _;
+
+
+    self.load_dst.convert(out_grad, self.dst_buf.as_mut_ptr()).unwrap();
+
     let status = unsafe { dnnExecute_F32(self.inner, self.res.as_mut_ptr()) };
     if status.is_err() {
       return Err(status);
     }
+
+    self.store_src.convert(self.src_buf.as_ptr(), in_grad).unwrap();
+
     Ok(())
   }
 }
